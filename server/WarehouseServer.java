@@ -5,7 +5,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class . WarehouseServer {
+public class WarehouseServer {
     public static final int PORT = 5000;
     private ConcurrentHashMap<String, Integer> inventory = new ConcurrentHashMap<>();
 
@@ -31,4 +31,4 @@ public class . WarehouseServer {
     public static void main(String[] args) {
         new WarehouseServer().start();
     }
-} 
+}
