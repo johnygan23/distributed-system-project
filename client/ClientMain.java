@@ -2,6 +2,7 @@ package client;
 
 import client.gui.InventoryGUI;
 import javax.swing.*;
+import java.util.Map;
 
 public class ClientMain {
     public static void main(String[] args) {
@@ -16,17 +17,29 @@ public class ClientMain {
             ChatClient chatClient = new ChatClient(branchClient.out, branchName);
             InventoryGUI gui = new InventoryGUI(branchClient, chatClient);
 
-            // Listen for server messages and update GUI accordingly
-            new Thread(() -> {
-                branchClient.listen();
-            }).start();
+            // Set up GUI callback
+            branchClient.setMessageCallback(new BranchClient.MessageCallback() {
+                @Override
+                public void onInventoryUpdate(Map<String, Integer> inventory) {
+                    // GUI will auto-refresh, but we could force update here
+                }
 
-            // Hook for updating inventory and chat from BranchClient
-            // (You may want to refactor BranchClient to accept callbacks for GUI updates)
+                @Override
+                public void onChatMessage(String sender, String message) {
+                    gui.appendChatMessage("[" + sender + "] " + message);
+                }
 
-            SwingUtilities.invokeLater(() -> gui.setVisible(true));
+                @Override
+                public void onRequestDenied(String reason) {
+                    gui.appendChatMessage("SERVER: " + reason);
+                }
+            });
+
+            // Start listening (remove extra Thread wrapper)
+            branchClient.listen();
+
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
-} 
+}

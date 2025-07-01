@@ -16,6 +16,11 @@ public class ClientHandler implements Runnable {
     private ObjectInputStream in;
     private static RicartAgrawala ricartAgrawala = new RicartAgrawala();
 
+    static {
+        // Initialize with client outputs when first client connects
+        ricartAgrawala.setClientOutputs(clientOutputs);
+    }
+
     public ClientHandler(Socket socket, ConcurrentHashMap<String, Integer> inventory) {
         this.socket = socket;
         this.inventory = inventory;
@@ -26,9 +31,13 @@ public class ClientHandler implements Runnable {
         try {
             out = new ObjectOutputStream(socket.getOutputStream());
             in = new ObjectInputStream(socket.getInputStream());
+
             synchronized (clientOutputs) {
                 clientOutputs.add(out);
+                // Register this client with Ricart-Agrawala
+                ricartAgrawala.addNode("CLIENT_" + clientOutputs.size());
             }
+
             while (true) {
                 Message msg = (Message) in.readObject();
                 switch (msg.type) {
@@ -48,10 +57,12 @@ public class ClientHandler implements Runnable {
                         }
                         if (approved) {
                             // Broadcast update to all clients
-                            Message updateMsg = new Message(Message.Type.UPDATE, "Server", item + ":" + qty, new ConcurrentHashMap<>(inventory), msg.lamportTimestamp);
+                            Message updateMsg = new Message(Message.Type.UPDATE, "Server", item + ":" + qty,
+                                    new ConcurrentHashMap<>(inventory), msg.lamportTimestamp);
                             broadcast(updateMsg);
                         } else {
-                            Message denyMsg = new Message(Message.Type.DENY, "Server", "Denied: Not enough stock", null, msg.lamportTimestamp);
+                            Message denyMsg = new Message(Message.Type.DENY, "Server", "Denied: Not enough stock", null,
+                                    msg.lamportTimestamp);
                             out.writeObject(denyMsg);
                         }
                         ricartAgrawala.releaseCS();
@@ -69,6 +80,7 @@ public class ClientHandler implements Runnable {
         } finally {
             synchronized (clientOutputs) {
                 clientOutputs.remove(out);
+                ricartAgrawala.removeNode("CLIENT_" + (clientOutputs.size() + 1));
             }
         }
     }
@@ -79,8 +91,9 @@ public class ClientHandler implements Runnable {
                 try {
                     o.writeObject(msg);
                     o.flush();
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             }
         }
     }
-} 
+}
