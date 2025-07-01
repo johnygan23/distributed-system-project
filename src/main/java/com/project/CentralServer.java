@@ -46,7 +46,7 @@ public class CentralServer {
                         Product product = warehouseStock.get(productId);
                         if (product != null && product.getQuantity() >= amount) {
                             product.setQuantity(product.getQuantity() - amount);
-                            out.println("APPROVED:" + productId);
+                            out.println("APPROVED:" + productId + ":" + amount);
                         } else {
                             out.println("DENIED:" + productId);
                         }
