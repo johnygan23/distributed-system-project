@@ -11,19 +11,23 @@ public class SimulatedClient implements Runnable {
     private BufferedReader in;
     private Socket socket;
     private boolean running = true;
-    private Map<String, Product> warehouseStock = new HashMap<>();
+    private Map<String, Product> warehouseStock = new HashMap<>(); // This isn't strictly needed for client simulation logic here
     private Map<String, Integer> localInventory = new HashMap<>();
     private Random random = new Random();
 
     // Simulation parameters
-    private int minRequestDelay = 2000; // 2 seconds
-    private int maxRequestDelay = 8000; // 8 seconds
+    private int minRequestDelay = 2000; // 2 seconds delay BEFORE sending request (client thought/prep time)
+    private int maxRequestDelay = 8000; // 8 seconds delay BEFORE sending request
     private int minRequestQuantity = 1;
     private int maxRequestQuantity = 10;
     private double requestProbability = 0.7; // 70% chance to make a request each cycle
 
     // Available products to request
     private String[] availableProducts = { "P001", "P002", "P003", "P004", "P005" };
+
+    // New: Specific product targeting for lock simulation
+    private String targetProductId = null; // If set, client will primarily request this product
+    private double targetProductBias = 0.8; // Probability of requesting the target product if set
 
     public SimulatedClient(String clientId) {
         this.clientId = clientId;
@@ -37,10 +41,12 @@ public class SimulatedClient implements Runnable {
             socket = new Socket("localhost", 5000);
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            log("Connected to server");
+            log("Connected to server.");
+            // Request initial inventory update (optional, just for completeness)
+            out.println("SHOW");
             return true;
         } catch (IOException e) {
-            log("Failed to connect: " + e.getMessage());
+            log("Failed to connect to server: " + e.getMessage());
             return false;
         }
     }
@@ -51,173 +57,152 @@ public class SimulatedClient implements Runnable {
             return;
         }
 
-        // Start listening to server responses
+        // Separate thread for listening to server responses
         new Thread(this::listenToServer).start();
 
-        // Request initial inventory
-        requestInventory();
-
-        // Main simulation loop
         while (running) {
             try {
-                // Random delay between actions
-                int delay = ThreadLocalRandom.current().nextInt(minRequestDelay, maxRequestDelay + 1);
-                Thread.sleep(delay);
+                // Client's internal "thought" or "preparation" delay before deciding to send a request
+                int prepDelay = ThreadLocalRandom.current().nextInt(minRequestDelay, maxRequestDelay + 1);
+                Thread.sleep(prepDelay);
 
-                // Decide what action to take
-                double action = random.nextDouble();
-
-                if (action < requestProbability) {
-                    makeRandomStockRequest();
-                } else if (action < 0.9) {
-                    requestInventory();
+                if (random.nextDouble() < requestProbability) {
+                    sendStockRequest();
                 } else {
-                    sendPing();
+                    // Sometimes just show inventory or ping
+                    if (random.nextBoolean()) {
+                        out.println("SHOW");
+                        log("Requested warehouse inventory.");
+                    } else {
+                        out.println("PING");
+                        log("Sent PING.");
+                    }
                 }
-
             } catch (InterruptedException e) {
-                log("Simulation interrupted");
-                break;
+                Thread.currentThread().interrupt();
+                log("Client " + clientId + " interrupted.");
+                running = false;
+            } catch (Exception e) {
+                log("Error in client run loop: " + e.getMessage());
+                running = false;
             }
         }
-
         disconnect();
     }
 
     private void listenToServer() {
         try {
             String line;
-            boolean receivingInventory = false;
-
             while ((line = in.readLine()) != null && running) {
-                if (line.equals("INVENTORY_UPDATE")) {
-                    receivingInventory = true;
-                    warehouseStock.clear();
-                    continue;
-                } else if (line.equals("INVENTORY_END")) {
-                    receivingInventory = false;
-                    log("Received inventory update - " + warehouseStock.size() + " products available");
-                    continue;
-                }
-
-                if (receivingInventory && line.startsWith("PRODUCT:")) {
-                    String[] parts = line.split(":");
-                    if (parts.length == 4) {
-                        String id = parts[1];
-                        String name = parts[2];
-                        int quantity = Integer.parseInt(parts[3]);
-                        warehouseStock.put(id, new Product(id, name, quantity));
-                    }
-                } else if (line.startsWith("APPROVED:")) {
-                    String[] parts = line.split(":");
-                    String productId = parts[1];
-                    int amount = Integer.parseInt(parts[2]);
-
-                    // Update local inventory
-                    localInventory.put(productId, localInventory.getOrDefault(productId, 0) + amount);
-                    log("✓ APPROVED: " + productId + " x" + amount + " (Local stock: " + localInventory.get(productId)
-                            + ")");
-
-                } else if (line.startsWith("DENIED:")) {
-                    String[] parts = line.split(":");
-                    String productId = parts[1];
-                    log("✗ DENIED: " + productId + " (Insufficient warehouse stock)");
-
-                } else if (line.equals("PONG")) {
-                    log("Server responded to ping");
-                }
+                processServerMessage(line);
             }
         } catch (IOException e) {
-            if (running) {
-                log("Lost connection to server: " + e.getMessage());
+            if (running) { // Only log if not intentionally disconnected
+                log("Server connection lost: " + e.getMessage());
             }
+        } finally {
+            disconnect(); // Ensure cleanup if listener thread terminates
         }
     }
 
-    private void makeRandomStockRequest() {
-        if (warehouseStock.isEmpty()) {
-            requestInventory();
-            return;
+    private void processServerMessage(String message) {
+        String[] parts = message.split(":");
+        switch (parts[0]) {
+            case "INVENTORY_UPDATE":
+                // Handle inventory update (optional for simulation focus)
+                log("Received warehouse inventory update.");
+                break;
+            case "PRODUCT":
+                // Process individual product updates (optional)
+                break;
+            case "INVENTORY_END":
+                log("Warehouse inventory update complete.");
+                break;
+            case "ACK_WAITING":
+                if (parts.length == 4) {
+                    String productId = parts[1];
+                    int amount = Integer.parseInt(parts[2]);
+                    int clientWaitDelay = Integer.parseInt(parts[3]);
+                    log("Received ACK for " + productId + " (" + amount + "). Client waiting for " + clientWaitDelay + "ms as instructed by server...");
+                    try {
+                        Thread.sleep(clientWaitDelay); // Client waits as instructed by server
+                        log("Client finished waiting for " + productId + ". Expecting final response.");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        log("Client wait interrupted for " + productId);
+                    }
+                }
+                break;
+            case "APPROVED":
+                if (parts.length == 3) {
+                    String productId = parts[1];
+                    int amount = Integer.parseInt(parts[2]);
+                    localInventory.put(productId, localInventory.getOrDefault(productId, 0) + amount);
+                    log("Replenishment APPROVED for " + amount + " units of " + productId);
+                }
+                break;
+            case "DENIED":
+                if (parts.length == 3) {
+                    String productId = parts[1];
+                    log("Replenishment DENIED for " + productId);
+                }
+                break;
+            case "PONG":
+                log("Received PONG from server.");
+                break;
+            case "SERVER_ERROR":
+                log("Server error: " + (parts.length > 1 ? parts[1] : "Unknown error"));
+                break;
+            default:
+                // log("Unknown server message: " + message);
+                break;
         }
-
-        // Select random product from available products
-        String productId = availableProducts[random.nextInt(availableProducts.length)];
-
-        // Check if product exists in warehouse
-        Product warehouseProduct = warehouseStock.get(productId);
-        if (warehouseProduct == null || warehouseProduct.getQuantity() == 0) {
-            log("Skipping request for " + productId + " (not available in warehouse)");
-            return;
-        }
-
-        // Generate random quantity (but not more than available)
-        int maxAvailable = Math.min(warehouseProduct.getQuantity(), maxRequestQuantity);
-        int requestQuantity = ThreadLocalRandom.current().nextInt(minRequestQuantity, maxAvailable + 1);
-
-        log("Requesting " + requestQuantity + " units of " + productId +
-                " (Warehouse has: " + warehouseProduct.getQuantity() + ")");
-
-        out.println("REQUEST:" + productId + ":" + requestQuantity);
     }
 
-    private void requestInventory() {
-        out.println("SHOW");
-    }
+    private void sendStockRequest() {
+        String productId;
+        // Logic to choose product for request
+        if (targetProductId != null && random.nextDouble() < targetProductBias) {
+            productId = targetProductId; // Prioritize target product
+        } else {
+            // Pick a random product from the available list
+            productId = availableProducts[random.nextInt(availableProducts.length)];
+        }
+        int amount = ThreadLocalRandom.current().nextInt(minRequestQuantity, maxRequestQuantity + 1);
 
-    private void sendPing() {
-        out.println("PING");
+        out.println("REQUEST:" + productId + ":" + amount);
+        log("Sent request for " + amount + " units of " + productId);
     }
 
     private void disconnect() {
-        running = false;
+        running = false; // Mark as not running before closing streams
         try {
-            if (out != null)
-                out.close();
-            if (in != null)
-                in.close();
-            if (socket != null)
-                socket.close();
+            if (out != null) out.close();
+            if (in != null) in.close();
+            if (socket != null) socket.close();
+            log("Disconnected from server.");
         } catch (IOException e) {
             // Ignore cleanup errors
         }
-        log("Disconnected from server");
     }
 
     private void log(String message) {
-        String timestamp = new java.text.SimpleDateFormat("HH:mm:ss").format(new Date());
+        String timestamp = new java.text.SimpleDateFormat("HH:mm:ss.SSS").format(new Date()); // Milliseconds for precision
         System.out.println("[" + timestamp + "] " + clientId + ": " + message);
     }
 
-    // Getters for monitoring
-    public String getClientId() {
-        return clientId;
+    // New configuration method for targeted product requests
+    public void setTargetProduct(String productId, double bias) {
+        this.targetProductId = productId;
+        this.targetProductBias = bias;
     }
 
-    public Map<String, Integer> getLocalInventory() {
-        return new HashMap<>(localInventory);
-    }
-
-    public boolean isRunning() {
-        return running;
-    }
-
-    public void stop() {
-        running = false;
-        disconnect();
-    }
-
-    // Configuration methods
-    public void setRequestDelay(int min, int max) {
-        this.minRequestDelay = min;
-        this.maxRequestDelay = max;
-    }
-
-    public void setRequestQuantityRange(int min, int max) {
-        this.minRequestQuantity = min;
-        this.maxRequestQuantity = max;
-    }
-
-    public void setRequestProbability(double probability) {
-        this.requestProbability = Math.max(0.0, Math.min(1.0, probability));
-    }
+    // Getters and other methods (unchanged)
+    public String getClientId() { return clientId; }
+    public Map<String, Integer> getLocalInventory() { return new HashMap<>(localInventory); }
+    public boolean isRunning() { return running; }
+    public void stop() { running = false; }
+    public void setRequestDelay(int min, int max) { this.minRequestDelay = min; this.maxRequestDelay = max; }
+    public void setRequestQuantityRange(int min, int max) { this.minRequestQuantity = min; this.maxRequestQuantity = max; }
+    public void setRequestProbability(double probability) { this.requestProbability = probability; }
 }

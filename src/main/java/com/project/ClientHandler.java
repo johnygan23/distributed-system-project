@@ -3,6 +3,10 @@ package com.project;
 import java.io.*;
 import java.net.*;
 import java.util.Date;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.Executors; // Import for ScheduledExecutorService
+import java.util.concurrent.ScheduledExecutorService; // Import for ScheduledExecutorService
+import java.util.concurrent.TimeUnit; // Import for TimeUnit
 
 public class ClientHandler implements Runnable {
     private Socket socket;
@@ -12,6 +16,13 @@ public class ClientHandler implements Runnable {
     private String clientAddress;
     private Date connectedTime;
     private boolean connected;
+
+    // Server-side configuration for the random wait time to send to the client
+    private int minClientWaitTimeMs = 2500; // Minimum delay for client to wait
+    private int maxClientWaitTimeMs = 10000; // Maximum delay for client to wait
+
+    // Executor for scheduling delayed tasks (one per client handler)
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     public ClientHandler(Socket socket, CentralServer server) {
         this.socket = socket;
@@ -35,7 +46,7 @@ public class ClientHandler implements Runnable {
                 processClientRequest(input);
             }
         } catch (IOException e) {
-            System.err.println("Client handler error: " + e.getMessage());
+            System.err.println("Client handler error for " + clientAddress + ": " + e.getMessage());
         } finally {
             cleanup();
         }
@@ -64,60 +75,77 @@ public class ClientHandler implements Runnable {
 
     private void handleStockRequest(String[] parts) {
         if (parts.length == 3) {
-            try {
-                String productId = parts[1];
-                int amount = Integer.parseInt(parts[2]);
+            String productId = parts[1];
+            int amount = Integer.parseInt(parts[2]);
 
-                boolean approved = server.processRequest(productId, amount);
+            // 1. Generate a random waiting time for the client
+            int clientWaitDelay = ThreadLocalRandom.current().nextInt(minClientWaitTimeMs, maxClientWaitTimeMs + 1);
 
-                if (approved) {
-                    out.println("APPROVED:" + productId + ":" + amount);
-                } else {
-                    out.println("DENIED:" + productId + ":" + amount);
+            // 2. Immediately send an acknowledgment with the waiting time
+            out.println("ACK_WAITING:" + productId + ":" + amount + ":" + clientWaitDelay);
+            System.out.println("Server: Sent ACK for " + productId + " to " + clientAddress + ". Client to wait for " + clientWaitDelay + "ms.");
+
+            // 3. Schedule the actual processing and final response after the delay
+            scheduler.schedule(() -> {
+                try {
+                    // Perform the actual inventory processing
+                    boolean approved = server.processRequest(productId, amount); //
+
+                    // Send the final response
+                    if (approved) {
+                        out.println("APPROVED:" + productId + ":" + amount); //
+                        System.out.println("Server: Sent APPROVED for " + productId + " to " + clientAddress);
+                    } else {
+                        out.println("DENIED:" + productId + ":" + amount); //
+                        System.out.println("Server: Sent DENIED for " + productId + " to " + clientAddress);
+                    }
+                } catch (Exception e) {
+                    System.err.println("Error processing delayed request for " + clientAddress + ": " + e.getMessage());
+                    out.println("SERVER_ERROR:Delayed processing failed");
                 }
-            } catch (NumberFormatException e) {
-                out.println("INVALID_FORMAT");
-            }
+            }, clientWaitDelay, TimeUnit.MILLISECONDS);
+
         } else {
-            out.println("INVALID_REQUEST_FORMAT");
+            out.println("INVALID_REQUEST_FORMAT"); //
         }
     }
 
     public void sendInventoryUpdate() {
         if (out != null && connected) {
-            out.println("INVENTORY_UPDATE");
-            for (Product product : server.getWarehouseStock().values()) {
-                out.println("PRODUCT:" + product.getId() + ":" + product.getName() + ":" + product.getQuantity());
+            out.println("INVENTORY_UPDATE"); //
+            for (Product product : server.getWarehouseStock().values()) { //
+                out.println("PRODUCT:" + product.getId() + ":" + product.getName() + ":" + product.getQuantity()); //
             }
-            out.println("INVENTORY_END");
+            out.println("INVENTORY_END"); //
         }
     }
 
     private void cleanup() {
         connected = false;
+        scheduler.shutdownNow(); // Shut down the scheduler when client disconnects
         try {
             if (in != null)
-                in.close();
+                in.close(); //
             if (out != null)
-                out.close();
+                out.close(); //
             if (socket != null)
-                socket.close();
+                socket.close(); //
         } catch (IOException e) {
-            System.err.println("Error during cleanup: " + e.getMessage());
+            System.err.println("Error during cleanup for " + clientAddress + ": " + e.getMessage()); //
         }
-        server.removeClient(this);
+        server.removeClient(this); //
     }
 
     // Getters for server GUI
     public String getClientAddress() {
-        return clientAddress;
+        return clientAddress; //
     }
 
     public Date getConnectedTime() {
-        return connectedTime;
+        return connectedTime; //
     }
 
     public boolean isConnected() {
-        return connected && !socket.isClosed();
+        return connected && !socket.isClosed(); //
     }
 }

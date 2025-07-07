@@ -8,6 +8,10 @@ import java.net.*;
 import javax.swing.table.DefaultTableModel;
 import java.util.HashMap;
 import java.util.Map;
+// Import for ThreadLocalRandom if you need it for client-side randomness,
+// though not strictly necessary for this specific delay logic now.
+// import java.util.concurrent.ThreadLocalRandom;
+
 
 public class BranchClientApp extends JFrame {
     private JTextArea logArea;
@@ -267,7 +271,31 @@ public class BranchClientApp extends JFrame {
                         int quantity = Integer.parseInt(parts[3]);
                         warehouseStock.put(id, new Product(id, name, quantity));
                     }
-                } else if (line.startsWith("APPROVED:")) {
+                }
+                // Handle the new ACK_WAITING message
+                else if (line.startsWith("ACK_WAITING:")) {
+                    String[] parts = line.split(":");
+                    if (parts.length == 4) {
+                        String productId = parts[1];
+                        int amount = Integer.parseInt(parts[2]);
+                        int waitingTime = Integer.parseInt(parts[3]);
+
+                        log("Received ACK for " + productId + " (" + amount + ") from server. Waiting for " + waitingTime + "ms...");
+
+                        // Implement the client-side delay here, in a new thread
+                        // so the listenToServer thread doesn't block
+                        new Thread(() -> {
+                            try {
+                                Thread.sleep(waitingTime);
+                                log("Client finished waiting for " + productId + ". Expecting final response.");
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                log("Client waiting for " + productId + " was interrupted.");
+                            }
+                        }).start();
+                    }
+                }
+                else if (line.startsWith("APPROVED:")) {
                     String[] parts = line.split(":");
                     String productId = parts[1];
                     int amount = Integer.parseInt(parts[2]);
@@ -294,7 +322,10 @@ public class BranchClientApp extends JFrame {
                     JOptionPane.showMessageDialog(this,
                             "Stock request denied for " + productId + "\nInsufficient stock in warehouse.",
                             "Request Denied", JOptionPane.WARNING_MESSAGE);
+                } else if (line.startsWith("SERVER_ERROR:")) {
+                    log("Server error: " + line);
                 }
+                // Other messages like PONG (if implemented) could go here
             }
         } catch (IOException e) {
             log("Connection to server lost: " + e.getMessage());
@@ -304,7 +335,7 @@ public class BranchClientApp extends JFrame {
     private void requestStock(String productId, int quantity) {
         if (out != null) {
             out.println("REQUEST:" + productId + ":" + quantity);
-            log("Requested " + quantity + " units of " + productId);
+            log("Sent request for " + quantity + " units of " + productId + ". Waiting for ACK...");
         } else {
             JOptionPane.showMessageDialog(this, "Not connected to server!");
         }

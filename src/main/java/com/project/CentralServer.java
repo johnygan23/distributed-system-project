@@ -157,7 +157,7 @@ public class CentralServer extends JFrame {
                     try {
                         Socket clientSocket = serverSocket.accept();
                         ClientHandler clientHandler = new ClientHandler(clientSocket, this);
-                        synchronized (connectedClients) {
+                        synchronized (connectedClients) { // Synchronize access to connectedClients list
                             connectedClients.add(clientHandler);
                         }
                         new Thread(clientHandler).start();
@@ -199,11 +199,22 @@ public class CentralServer extends JFrame {
                 String name = nameField.getText().trim();
                 int quantity = Integer.parseInt(quantityField.getText().trim());
 
-                if (warehouseStock.containsKey(id)) {
-                    Product existing = warehouseStock.get(id);
-                    existing.setQuantity(existing.getQuantity() + quantity);
+                Product product = warehouseStock.get(id);
+                if (product != null) {
+                    log("Attempting to acquire lock for product " + id + " (Thread: " + Thread.currentThread().getName() + ")");
+                    product.getLock().lock(); // Acquire lock for existing product
+                    try {
+                        log("Lock acquired for product " + id + " (Thread: " + Thread.currentThread().getName() + ")");
+                        product.setQuantity(product.getQuantity() + quantity);
+                    } finally {
+                        product.getLock().unlock(); // Release lock
+                        log("Lock released for product " + id + " (Thread: " + Thread.currentThread().getName() + ")");
+                    }
                 } else {
+                    // When adding a new product, no existing lock to acquire.
+                    // For full robustness in highly concurrent add scenarios, you might need a lock around Map.put.
                     warehouseStock.put(id, new Product(id, name, quantity));
+                    log("Added new product " + id + " (no lock needed for creation).");
                 }
 
                 refreshInventoryTable();
@@ -241,13 +252,25 @@ public class CentralServer extends JFrame {
             try {
                 int quantity = Integer.parseInt(quantityStr);
                 Product product = warehouseStock.get(selectedId);
-                if (product.getQuantity() >= quantity) {
-                    product.setQuantity(product.getQuantity() - quantity);
-                    refreshInventoryTable();
-                    broadcastInventoryUpdate();
-                    log("Removed stock: " + selectedId + " (-" + quantity + ")");
+                if (product != null) { // Check if product exists before trying to lock
+                    log("Attempting to acquire lock for product " + selectedId + " (Thread: " + Thread.currentThread().getName() + ")");
+                    product.getLock().lock(); // Acquire lock
+                    try {
+                        log("Lock acquired for product " + selectedId + " (Thread: " + Thread.currentThread().getName() + ")");
+                        if (product.getQuantity() >= quantity) {
+                            product.setQuantity(product.getQuantity() - quantity);
+                            refreshInventoryTable();
+                            broadcastInventoryUpdate();
+                            log("Removed stock: " + selectedId + " (-" + quantity + ")");
+                        } else {
+                            JOptionPane.showMessageDialog(this, "Not enough stock available!");
+                        }
+                    } finally {
+                        product.getLock().unlock(); // Release lock
+                        log("Lock released for product " + selectedId + " (Thread: " + Thread.currentThread().getName() + ")");
+                    }
                 } else {
-                    JOptionPane.showMessageDialog(this, "Not enough stock available!");
+                    JOptionPane.showMessageDialog(this, "Product not found!");
                 }
             } catch (NumberFormatException e) {
                 JOptionPane.showMessageDialog(this, "Invalid quantity format!");
@@ -255,18 +278,33 @@ public class CentralServer extends JFrame {
         }
     }
 
-    public synchronized boolean processRequest(String productId, int amount) {
+    public boolean processRequest(String productId, int amount) {
         Product product = warehouseStock.get(productId);
-        if (product != null && product.getQuantity() >= amount) {
-            product.setQuantity(product.getQuantity() - amount);
-            refreshInventoryTable();
-            broadcastInventoryUpdate();
-            log("Request approved: " + productId + " (-" + amount + ") - Remaining: " + product.getQuantity());
-            return true;
-        } else {
-            log("Request denied: " + productId + " (requested: " + amount +
-                    ", available: " + (product != null ? product.getQuantity() : 0) + ")");
+        if (product == null) {
+            log("Request denied: " + productId + " (Product not found)");
             return false;
+        }
+
+        // Acquire the lock for this specific product
+        log("Attempting to acquire lock for product " + productId + " (Thread: " + Thread.currentThread().getName() + ")");
+        product.getLock().lock();
+        try {
+            log("Lock acquired for product " + productId + " (Thread: " + Thread.currentThread().getName() + ")");
+            if (product.getQuantity() >= amount) {
+                product.setQuantity(product.getQuantity() - amount);
+                refreshInventoryTable(); // GUI update, should be SwingUtilities.invokeLater
+                broadcastInventoryUpdate();
+                log("Request approved: " + productId + " (-" + amount + ") - Remaining: " + product.getQuantity());
+                return true;
+            } else {
+                log("Request denied: " + productId + " (requested: " + amount +
+                        ", available: " + product.getQuantity() + ")");
+                return false;
+            }
+        } finally {
+            // Ensure the lock is always released
+            product.getLock().unlock();
+            log("Lock released for product " + productId + " (Thread: " + Thread.currentThread().getName() + ")");
         }
     }
 
@@ -275,7 +313,7 @@ public class CentralServer extends JFrame {
     }
 
     private void broadcastInventoryUpdate() {
-        synchronized (connectedClients) {
+        synchronized (connectedClients) { // Synchronize access to connectedClients list
             for (ClientHandler client : connectedClients) {
                 client.sendInventoryUpdate();
             }
@@ -283,7 +321,7 @@ public class CentralServer extends JFrame {
     }
 
     public void removeClient(ClientHandler client) {
-        synchronized (connectedClients) {
+        synchronized (connectedClients) { // Synchronize access to connectedClients list
             connectedClients.remove(client);
         }
         refreshClientsTable();
@@ -291,7 +329,7 @@ public class CentralServer extends JFrame {
 
     private void log(String message) {
         SwingUtilities.invokeLater(() -> {
-            String timestamp = new java.util.Date().toString();
+            String timestamp = new java.text.SimpleDateFormat("HH:mm:ss.SSS").format(new Date()); // Add milliseconds for better precision
             logArea.append("[" + timestamp + "] " + message + "\n");
             logArea.setCaretPosition(logArea.getDocument().getLength());
         });

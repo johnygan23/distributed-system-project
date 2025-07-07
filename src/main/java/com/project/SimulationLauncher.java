@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class SimulationLauncher {
     private List<SimulatedClient> clients = new ArrayList<>();
@@ -25,166 +26,113 @@ public class SimulationLauncher {
             System.out.println("2. Heavy load simulation (10 clients, high activity)");
             System.out.println("3. Light simulation (3 clients, low activity)");
             System.out.println("4. Custom simulation");
-            System.out.println("5. Show client status");
-            System.out.println("6. Stop all clients");
-            System.out.println("7. Exit");
-            System.out.print("Choose option (1-7): ");
+            System.out.println("5. Simulate High Contention (All clients target P001)"); // New Scenario
+            System.out.println("6. Simulate High Concurrency (Clients target diverse products)"); // New Scenario
+            System.out.println("7. Show client status");
+            System.out.println("8. Stop all clients");
+            System.out.println("9. Exit");
+            System.out.print("Choose option (1-9): ");
 
             try {
                 int choice = Integer.parseInt(scanner.nextLine().trim());
                 handleMenuChoice(choice);
             } catch (NumberFormatException e) {
-                System.out.println("Invalid input. Please enter a number 1-7.");
+                System.out.println("Invalid input. Please enter a number.");
             }
         }
     }
 
     private void handleMenuChoice(int choice) {
+        stopAllClients(); // Stop any existing clients before starting new ones
+
         switch (choice) {
-            case 1:
-                runQuickSimulation();
+            case 1: // Quick simulation
+                startSimulation(5, 3000, 7000, 1, 5, 0.6, null, 0); // No specific product target
                 break;
-            case 2:
-                runHeavyLoadSimulation();
+            case 2: // Heavy load
+                startSimulation(10, 500, 2000, 1, 10, 0.9, null, 0); // No specific product target
                 break;
-            case 3:
-                runLightSimulation();
+            case 3: // Light load
+                startSimulation(3, 8000, 15000, 1, 3, 0.4, null, 0); // No specific product target
                 break;
-            case 4:
-                runCustomSimulation();
+            case 4: // Custom simulation
+                System.out.print("Enter number of clients: ");
+                int numClients = Integer.parseInt(scanner.nextLine());
+                System.out.print("Enter min request delay (ms): ");
+                int minDelay = Integer.parseInt(scanner.nextLine());
+                System.out.print("Enter max request delay (ms): ");
+                int maxDelay = Integer.parseInt(scanner.nextLine());
+                System.out.print("Enter min request quantity: ");
+                int minQty = Integer.parseInt(scanner.nextLine());
+                System.out.print("Enter max request quantity: ");
+                int maxQty = Integer.parseInt(scanner.nextLine());
+                System.out.print("Enter request probability (0.0-1.0): ");
+                double prob = Double.parseDouble(scanner.nextLine());
+                startSimulation(numClients, minDelay, maxDelay, minQty, maxQty, prob, null, 0);
                 break;
-            case 5:
+            case 5: // Simulate High Contention
+                // All clients target P001 with high bias
+                startSimulation(8, 500, 1500, 1, 5, 0.9, "P001", 1.0); // 1.0 bias means always target P001
+                System.out.println("\n--- Running High Contention Scenario (all clients target P001) ---");
+                System.out.println("Observe server logs for lock contention on P001.");
+                break;
+            case 6: // Simulate High Concurrency
+                // Clients target different products, or all target with low bias to spread requests
+                startSimulation(8, 500, 1500, 1, 5, 0.9, null, 0); // No specific product bias, random selection
+                // Or you could make clients specifically target different products if you spawn them individually:
+                // startHighConcurrencyScenario();
+                System.out.println("\n--- Running High Concurrency Scenario (clients target diverse products) ---");
+                System.out.println("Observe server logs for parallel processing of different products.");
+                break;
+            case 7: // Show client status (changed from 5)
                 showClientStatus();
                 break;
-            case 6:
+            case 8: // Stop all clients (changed from 6)
                 stopAllClients();
                 break;
-            case 7:
+            case 9: // Exit (changed from 7)
                 stopAllClients();
-                System.out.println("Goodbye!");
+                System.out.println("Exiting simulation launcher. Goodbye!");
+                scanner.close();
                 System.exit(0);
                 break;
             default:
-                System.out.println("Invalid choice. Please select 1-7.");
+                System.out.println("Invalid choice. Please try again.");
         }
     }
 
-    private void runQuickSimulation() {
-        System.out.println("\n🚀 Starting Quick Simulation (5 clients)...");
-        stopAllClients(); // Stop any running simulation
+    // Modified startSimulation to accept target product and bias
+    private void startSimulation(int numClients, int minDelay, int maxDelay, int minQty, int maxQty,
+                                 double requestProb, String targetProductId, double targetProductBias) {
+        executorService = Executors.newFixedThreadPool(numClients);
+        clients.clear(); // Clear previous clients
 
-        startSimulation(5, 3000, 7000, 1, 5, 0.6);
-        System.out.println("✓ Quick simulation started! Check the server GUI to see client activity.");
-    }
-
-    private void runHeavyLoadSimulation() {
-        System.out.println("\n💥 Starting Heavy Load Simulation (10 clients)...");
-        stopAllClients();
-
-        startSimulation(10, 1000, 4000, 1, 8, 0.8);
-        System.out.println("✓ Heavy load simulation started! Watch the server handle high traffic.");
-    }
-
-    private void runLightSimulation() {
-        System.out.println("\n🐌 Starting Light Simulation (3 clients)...");
-        stopAllClients();
-
-        startSimulation(3, 5000, 12000, 1, 3, 0.4);
-        System.out.println("✓ Light simulation started! Clients will make occasional requests.");
-    }
-
-    private void runCustomSimulation() {
-        System.out.println("\n⚙️ Custom Simulation Setup");
-
-        try {
-            System.out.print("Number of clients (1-20): ");
-            int numClients = Integer.parseInt(scanner.nextLine().trim());
-            numClients = Math.max(1, Math.min(20, numClients));
-
-            System.out.print("Minimum delay between requests (ms, default 2000): ");
-            String minDelayStr = scanner.nextLine().trim();
-            int minDelay = minDelayStr.isEmpty() ? 2000 : Integer.parseInt(minDelayStr);
-
-            System.out.print("Maximum delay between requests (ms, default 8000): ");
-            String maxDelayStr = scanner.nextLine().trim();
-            int maxDelay = maxDelayStr.isEmpty() ? 8000 : Integer.parseInt(maxDelayStr);
-
-            System.out.print("Maximum request quantity (default 5): ");
-            String maxQtyStr = scanner.nextLine().trim();
-            int maxQty = maxQtyStr.isEmpty() ? 5 : Integer.parseInt(maxQtyStr);
-
-            System.out.print("Request probability (0.0-1.0, default 0.7): ");
-            String probStr = scanner.nextLine().trim();
-            double probability = probStr.isEmpty() ? 0.7 : Double.parseDouble(probStr);
-
-            stopAllClients();
-            startSimulation(numClients, minDelay, maxDelay, 1, maxQty, probability);
-
-            System.out.println("✓ Custom simulation started with " + numClients + " clients!");
-
-        } catch (NumberFormatException e) {
-            System.out.println("Invalid input. Using default quick simulation.");
-            runQuickSimulation();
-        }
-    }
-
-    private void startSimulation(int numClients, int minDelay, int maxDelay,
-            int minQty, int maxQty, double probability) {
-
-        executorService = Executors.newFixedThreadPool(numClients + 2);
-
-        for (int i = 1; i <= numClients; i++) {
-            SimulatedClient client = new SimulatedClient("SimClient-" + i);
-
-            // Configure client behavior
+        System.out.println("Starting " + numClients + " simulated clients...");
+        for (int i = 0; i < numClients; i++) {
+            SimulatedClient client = new SimulatedClient("Client-" + (i + 1));
             client.setRequestDelay(minDelay, maxDelay);
             client.setRequestQuantityRange(minQty, maxQty);
-            client.setRequestProbability(probability);
-
+            client.setRequestProbability(requestProb);
+            if (targetProductId != null) {
+                client.setTargetProduct(targetProductId, targetProductBias);
+            } else {
+                // For diverse concurrency, ensure clients pick randomly from all available
+                // If you want to explicitly assign, you'd do it here based on client index
+            }
             clients.add(client);
             executorService.submit(client);
-
-            // Small delay between client connections
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                break;
-            }
         }
-
-        System.out.println("Started " + numClients + " simulated clients.");
-        System.out.println("Configuration:");
-        System.out.println("  - Request delay: " + minDelay + "-" + maxDelay + "ms");
-        System.out.println("  - Request quantity: " + minQty + "-" + maxQty);
-        System.out.println("  - Request probability: " + (probability * 100) + "%");
+        System.out.println("✓ Clients started.");
     }
 
     private void showClientStatus() {
-        if (clients.isEmpty()) {
-            System.out.println("No simulated clients are currently running.");
-            return;
-        }
-
-        System.out.println("\n--- Client Status ---");
-        System.out.println("Total simulated clients: " + clients.size());
-
+        // ... (unchanged)
         int runningCount = 0;
         for (SimulatedClient client : clients) {
-            String status = client.isRunning() ? "🟢 Running" : "🔴 Stopped";
-            System.out.printf("%-15s %s", client.getClientId(), status);
-
-            // Show local inventory summary
-            Map<String, Integer> inventory = client.getLocalInventory();
-            if (!inventory.isEmpty()) {
-                int totalItems = inventory.values().stream().mapToInt(Integer::intValue).sum();
-                System.out.print(" (Local stock: " + totalItems + " items)");
-            }
-            System.out.println();
-
-            if (client.isRunning())
+            if (client.isRunning()) {
                 runningCount++;
+            }
         }
-
         System.out.println("Running: " + runningCount + " | Stopped: " + (clients.size() - runningCount));
     }
 
@@ -192,12 +140,20 @@ public class SimulationLauncher {
         if (!clients.isEmpty()) {
             System.out.println("Stopping " + clients.size() + " simulated clients...");
 
-            for (SimulatedClient client : clients) {
-                client.stop();
-            }
+            // Use a parallel stream for faster stopping, or just a loop
+            clients.parallelStream().forEach(SimulatedClient::stop);
 
             if (executorService != null && !executorService.isShutdown()) {
                 executorService.shutdown();
+                try {
+                    // Wait a bit for tasks to terminate
+                    if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                        executorService.shutdownNow(); // Force shutdown
+                    }
+                } catch (InterruptedException e) {
+                    executorService.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
             }
 
             clients.clear();
@@ -205,26 +161,25 @@ public class SimulationLauncher {
         }
     }
 
-    // Preset simulation configurations
-    public static class SimulationPresets {
-        public static final String STRESS_TEST = "stress";
-        public static final String NORMAL_LOAD = "normal";
-        public static final String LIGHT_LOAD = "light";
+    // Helper for specific high concurrency if needed (optional)
+    /*
+    private void startHighConcurrencyScenario() {
+        stopAllClients(); // Stop previous clients
+        executorService = Executors.newFixedThreadPool(5); // Example
+        clients.clear();
 
-        public static void runPreset(String preset) {
-            SimulationLauncher launcher = new SimulationLauncher();
-
-            switch (preset.toLowerCase()) {
-                case STRESS_TEST:
-                    launcher.startSimulation(15, 500, 2000, 1, 10, 0.9);
-                    break;
-                case NORMAL_LOAD:
-                    launcher.startSimulation(5, 3000, 7000, 1, 5, 0.6);
-                    break;
-                case LIGHT_LOAD:
-                    launcher.startSimulation(3, 8000, 15000, 1, 3, 0.3);
-                    break;
-            }
+        String[] products = {"P001", "P002", "P003", "P004", "P005"};
+        for (int i = 0; i < 5; i++) {
+            SimulatedClient client = new SimulatedClient("Client-Conc-" + (i + 1));
+            client.setRequestDelay(500, 1500);
+            client.setRequestQuantityRange(1, 5);
+            client.setRequestProbability(0.9);
+            // Each client primarily targets a different product
+            client.setTargetProduct(products[i % products.length], 1.0); // 100% bias
+            clients.add(client);
+            executorService.submit(client);
         }
+        System.out.println("✓ High Concurrency clients started (each targeting a different product).");
     }
+    */
 }
