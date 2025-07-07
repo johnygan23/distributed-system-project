@@ -114,10 +114,10 @@ public class CentralServer extends JFrame {
 
     private void initializeInventory() {
         warehouseStock.put("P001", new Product("P001", "Pen", 100));
-        warehouseStock.put("P002", new Product("P002", "Notebook", 50));
-        warehouseStock.put("P003", new Product("P003", "Pencil", 75));
-        warehouseStock.put("P004", new Product("P004", "Eraser", 30));
-        warehouseStock.put("P005", new Product("P005", "Ruler", 25));
+        warehouseStock.put("P002", new Product("P002", "Notebook", 100));
+        warehouseStock.put("P003", new Product("P003", "Pencil", 100));
+        warehouseStock.put("P004", new Product("P004", "Eraser", 100));
+        warehouseStock.put("P005", new Product("P005", "Ruler", 100));
         refreshInventoryTable();
         log("Inventory initialized with " + warehouseStock.size() + " products.");
     }
